@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const db = require('./db');
+const pool = require('./db'); // PostgreSQL pool
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -12,85 +12,75 @@ app.use(express.json());
 // Routes
 
 // GET all attendance records
-app.get('/api/attendance', (req, res) => {
+app.get('/api/attendance', async (req, res) => {
   const { date, search } = req.query;
-  
-  let query = 'SELECT * FROM Attendance';
-  let params = [];
-  
-  // Add filters if provided
-  if (date || search) {
-    query += ' WHERE ';
+  try {
+    let query = 'SELECT * FROM attendance';
+    const params = [];
     const conditions = [];
-    
+
     if (date) {
-      conditions.push('date = ?');
+      conditions.push(`date = $${params.length + 1}`);
       params.push(date);
     }
-    
+
     if (search) {
-      conditions.push('(employeeName LIKE ? OR employeeID LIKE ?)');
+      conditions.push(`(employee_name ILIKE $${params.length + 1} OR employee_id ILIKE $${params.length + 2})`);
       params.push(`%${search}%`, `%${search}%`);
     }
-    
-    query += conditions.join(' AND ');
-  }
-  
-  query += ' ORDER BY date DESC, id DESC';
-  
-  db.all(query, params, (err, rows) => {
-    if (err) {
-      console.error('Error fetching attendance:', err.message);
-      res.status(500).json({ error: 'Failed to fetch attendance records' });
-    } else {
-      res.json(rows);
+
+    if (conditions.length) {
+      query += ' WHERE ' + conditions.join(' AND ');
     }
-  });
+
+    query += ' ORDER BY date DESC, id DESC';
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching attendance:', err);
+    res.status(500).json({ error: 'Failed to fetch attendance records' });
+  }
 });
 
 // POST new attendance record
-app.post('/api/attendance', (req, res) => {
+app.post('/api/attendance', async (req, res) => {
   const { employeeName, employeeID, date, status } = req.body;
-  
+
   // Validation
   if (!employeeName || !employeeID || !date || !status) {
     return res.status(400).json({ error: 'All fields are required' });
   }
-  
+
   if (!['Present', 'Absent'].includes(status)) {
     return res.status(400).json({ error: 'Status must be Present or Absent' });
   }
-  
-  const query = `INSERT INTO Attendance (employeeName, employeeID, date, status) 
-                 VALUES (?, ?, ?, ?)`;
-  
-  db.run(query, [employeeName, employeeID, date, status], function(err) {
-    if (err) {
-      console.error('Error inserting attendance:', err.message);
-      res.status(500).json({ error: 'Failed to save attendance record' });
-    } else {
-      res.status(201).json({ 
-        id: this.lastID,
-        message: 'Attendance recorded successfully' 
-      });
-    }
-  });
+
+  try {
+    const query = `INSERT INTO attendance (employee_name, employee_id, date, status)
+                   VALUES ($1, $2, $3, $4) RETURNING id`;
+    const result = await pool.query(query, [employeeName, employeeID, date, status]);
+    res.status(201).json({ id: result.rows[0].id, message: 'Attendance recorded successfully' });
+  } catch (err) {
+    console.error('Error inserting attendance:', err);
+    res.status(500).json({ error: 'Failed to save attendance record' });
+  }
 });
 
 // DELETE attendance record
-app.delete('/api/attendance/:id', (req, res) => {
+app.delete('/api/attendance/:id', async (req, res) => {
   const { id } = req.params;
-  
-  db.run('DELETE FROM Attendance WHERE id = ?', [id], function(err) {
-    if (err) {
-      console.error('Error deleting attendance:', err.message);
-      res.status(500).json({ error: 'Failed to delete attendance record' });
-    } else if (this.changes === 0) {
+  try {
+    const result = await pool.query('DELETE FROM attendance WHERE id = $1', [id]);
+    if (result.rowCount === 0) {
       res.status(404).json({ error: 'Record not found' });
     } else {
       res.json({ message: 'Attendance record deleted successfully' });
     }
-  });
+  } catch (err) {
+    console.error('Error deleting attendance:', err);
+    res.status(500).json({ error: 'Failed to delete attendance record' });
+  }
 });
 
 // Start server
