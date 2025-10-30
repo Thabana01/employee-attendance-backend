@@ -1,7 +1,7 @@
 {
   "name": "employee-attendance-backend",
   "version": "1.0.0",
-  "description": "Backend for Employee Attendance Tracker with MySQL",
+  "description": "Backend for Employee Attendance Tracker",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
